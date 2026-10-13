@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Belka – kalkulator belek</title>
+  <meta name="description" content="Darmowy kalkulator belek jedno- i wieloprzęsłowych: reakcje, wykresy M, V, ugięcia, obwiednie, sprawdzenie nośności belek drewnianych i stalowych.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='12' width='28' height='5' rx='1' fill='%232563eb'/%3E%3Cpath d='M6 17l-4 7h8zM26 17l-4 7h8z' fill='%23475569'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="2" y="12" width="28" height="5" rx="1" fill="currentColor"/><path d="M6 17l-4 7h8zM26 17l-4 7h8z" fill="currentColor" opacity=".55"/></svg>
+    <h1>Belka</h1>
+    <span class="sub">kalkulator belek ciągłych</span>
+  </div>
+  <div class="actions">
+    <label class="inline">Przykład
+      <select id="example">
+        <option value="">— wybierz —</option>
+        <option value="simple">Belka swobodnie podparta</option>
+        <option value="cantilever">Wspornik</option>
+        <option value="overhang">Belka ze wspornikiem</option>
+        <option value="cont3">Belka trójprzęsłowa</option>
+        <option value="fixed">Belka obustronnie utwierdzona</option>
+        <option value="gerber">Belka Gerbera (przegub)</option>
+        <option value="steel">Stalowa – podciąg IPE</option>
+      </select>
+    </label>
+    <button id="btnLink" class="btn">Kopiuj link</button>
+    <button id="btnPrint" class="btn">Drukuj / PDF</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="editor" id="editor">
+    <section class="card">
+      <h2>1. Schemat statyczny</h2>
+      <div id="geometry"></div>
+      <div class="row-btns">
+        <button class="btn small" id="addSpan">+ przęsło</button>
+        <button class="btn small" id="delSpan">− przęsło</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2. Przekrój</h2>
+      <div id="section"></div>
+    </section>
+
+    <section class="card">
+      <h2>3. Grupy obciążeń</h2>
+      <p class="hint">G – stałe (zawsze działają). Grupy Q – zmienne, program sam szuka najniekorzystniejszego układu (obwiednia).</p>
+      <div id="groups"></div>
+      <button class="btn small" id="addGroup">+ grupa zmienna</button>
+    </section>
+
+    <section class="card">
+      <h2>4. Obciążenia</h2>
+      <p class="hint">Wartości charakterystyczne. P, q w dół dodatnie; M dodatni zgodnie z ruchem wskazówek zegara. Odległość <b>a</b> liczona od lewego końca przęsła.</p>
+      <div id="loads"></div>
+      <div class="row-btns">
+        <button class="btn small" data-add="q">+ ciągłe q</button>
+        <button class="btn small" data-add="P">+ skupione P</button>
+        <button class="btn small" data-add="M">+ moment M</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>5. Ustawienia</h2>
+      <div id="settings"></div>
+    </section>
+  </aside>
+
+  <section class="results">
+    <div id="error" class="error" hidden></div>
+    <div class="card">
+      <div class="res-head">
+        <h2>Wykresy</h2>
+        <label class="inline">Pokaż
+          <select id="view"></select>
+        </label>
+      </div>
+      <div id="readout" class="readout">Najedź na wykres, by odczytać wartości.</div>
+      <div id="chart" class="chart"></div>
+      <p class="hint">Moment rysowany po stronie włókien rozciąganych (dodatni w dół). Siła tnąca dodatnia w górę, ugięcie dodatnie w dół.</p>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2>Reakcje podporowe</h2>
+        <div id="reactions"></div>
+      </div>
+      <div class="card">
+        <h2>Wartości ekstremalne</h2>
+        <div id="extremes"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="res-head">
+        <h2>Sprawdzenie przekroju</h2>
+        <button class="btn small" id="btnPick">Dobierz najmniejszy przekrój</button>
+      </div>
+      <div id="checks"></div>
+    </div>
+
+    <div class="card print-only">
+      <h2>Dane</h2>
+      <div id="summary"></div>
+    </div>
+
+    <footer class="foot">
+      Obliczenia metodą przemieszczeń (teoria Eulera–Bernoulliego, stała sztywność EI, bez odkształceń postaciowych).
+      Sprawdzenia wg uproszczonych zasad PN-EN 1990/1993/1995 – pomocniczo, do nauki i szacunków.
+      Nie zastępuje projektu konstruktora.
+    </footer>
+  </section>
+</main>
+
+<script src="js/sections.js"></script>
+<script src="js/solver.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
