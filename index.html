@@ -26,6 +26,7 @@
         <option value="fixed">Belka obustronnie utwierdzona</option>
         <option value="gerber">Belka Gerbera (przegub)</option>
         <option value="steel">Stalowa – podciąg IPE</option>
+        <option value="slab">Płyta stropowa żelbetowa (5 przęseł)</option>
       </select>
     </label>
     <button id="btnLink" class="btn">Kopiuj link</button>
@@ -49,15 +50,21 @@
       <div id="section"></div>
     </section>
 
+    <details class="card" id="zsCard" open>
+      <summary><h2>3. Zestawienie obciążeń stropu</h2></summary>
+      <p class="hint">Obciążenia na 1 m² stropu – jak w tabelce ręcznej. Przycisk „Wstaw do belki” zamienia je na q [kN/m] (× szerokość pasma) i potem pilnuje, żeby belka miała aktualne wartości.</p>
+      <div id="zs"></div>
+    </details>
+
     <section class="card">
-      <h2>3. Grupy obciążeń</h2>
+      <h2>4. Grupy obciążeń</h2>
       <p class="hint">G – stałe (zawsze działają). Grupy Q – zmienne, program sam szuka najniekorzystniejszego układu (obwiednia).</p>
       <div id="groups"></div>
       <button class="btn small" id="addGroup">+ grupa zmienna</button>
     </section>
 
     <section class="card">
-      <h2>4. Obciążenia</h2>
+      <h2>5. Obciążenia</h2>
       <p class="hint">Wartości charakterystyczne. P, q w dół dodatnie; M dodatni zgodnie z ruchem wskazówek zegara. Odległość <b>a</b> liczona od lewego końca przęsła.</p>
       <div id="loads"></div>
       <div class="row-btns">
@@ -68,7 +75,7 @@
     </section>
 
     <section class="card">
-      <h2>5. Ustawienia</h2>
+      <h2>6. Ustawienia</h2>
       <div id="settings"></div>
     </section>
   </aside>
@@ -106,6 +113,11 @@
       <div id="checks"></div>
     </div>
 
+    <div class="card" id="rcCard" hidden>
+      <h2>Zbrojenie główne</h2>
+      <div id="rcTable"></div>
+    </div>
+
     <div class="card print-only">
       <h2>Dane</h2>
       <div id="summary"></div>
@@ -113,7 +125,7 @@
 
     <footer class="foot">
       Obliczenia metodą przemieszczeń (teoria Eulera–Bernoulliego, stała sztywność EI, bez odkształceń postaciowych).
-      Sprawdzenia wg uproszczonych zasad PN-EN 1990/1993/1995 – pomocniczo, do nauki i szacunków.
+      Sprawdzenia wg uproszczonych zasad PN-EN 1990/1992/1993/1995 – pomocniczo, do nauki i szacunków.
       Nie zastępuje projektu konstruktora.
     </footer>
   </section>

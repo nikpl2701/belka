@@ -76,6 +76,102 @@
   };
   const KDEF = [0.6, 0.8, 2.0]; // klasy użytkowania 1, 2, 3
 
+
+  // ---------- żelbet (PN-EN 1992-1-1, uproszczone) ----------
+  // [f_ck, f_ctm] MPa, E_cm GPa – tab. 3.1
+  const CONCRETE = {
+    'C16/20': [16, 1.9, 29], 'C20/25': [20, 2.2, 30], 'C25/30': [25, 2.6, 31], 'C30/37': [30, 2.9, 33],
+    'C35/45': [35, 3.2, 34], 'C40/50': [40, 3.5, 35], 'C45/55': [45, 3.8, 36], 'C50/60': [50, 4.1, 37],
+  };
+  const GAMMA_C = 1.4, GAMMA_S = 1.15, E_S = 200000;
+
+  function rcMaterial(sec) {
+    const c = CONCRETE[sec.conc] || CONCRETE['C30/37'];
+    const fyk = +sec.fyk || 500;
+    return { conc: CONCRETE[sec.conc] ? sec.conc : 'C30/37', fck: c[0], fctm: c[1], Ecm: c[2],
+      fcd: c[0] / GAMMA_C, fyk, fyd: fyk / GAMMA_S };
+  }
+
+  /* Zginanie – przekrój prostokątny pojedynczo zbrojony, prostokątny wykres naprężeń (λ = 0,8, η = 1).
+   * MEd [kNm], b, d [mm] → A_s [mm²]. */
+  function rcBending(MEd, b, d, mat) {
+    const mu = Math.abs(MEd) * 1e6 / (b * d * d * mat.fcd);
+    const xiLim = 0.8 * 0.0035 / (0.0035 + mat.fyd / E_S);
+    const xi = mu < 0.5 ? 1 - Math.sqrt(1 - 2 * mu) : Infinity;
+    const As = xi * b * d * mat.fcd / mat.fyd;
+    const AsMin = Math.max(0.26 * mat.fctm / mat.fyk, 0.0013) * b * d;
+    return { mu, xi, xiLim, As, AsMin, AsReq: Math.max(As, AsMin) };
+  }
+
+  /* Propozycja prętów: płyta (b ≥ 500 mm) – rozstaw, belka – liczba prętów. */
+  function rcBars(AsReq, b, h, phi) {
+    const a1 = Math.PI * phi * phi / 4;
+    if (!isFinite(AsReq)) return { text: '–', AsProv: NaN };
+    if (b >= 500) {
+      const smax = Math.min(2 * h, 250);
+      const s = Math.min(Math.floor(b * a1 / AsReq / 10) * 10, smax);
+      if (s < 60) return { text: `φ${phi} – za gęsto, zwiększ średnicę`, AsProv: NaN };
+      return { text: `φ${phi} co ${s} mm`, AsProv: b * a1 / s, s };
+    }
+    const n = Math.max(2, Math.ceil(AsReq / a1 - 1e-9));
+    return { text: `${n}φ${phi}`, AsProv: n * a1, n };
+  }
+
+  /* Nośność na ścinanie elementu bez zbrojenia poprzecznego V_Rd,c [kN] (wzór 6.2). */
+  function rcVRdc(b, d, rho, mat) {
+    const k = Math.min(2, 1 + Math.sqrt(200 / d));
+    const vmin = 0.035 * Math.pow(k, 1.5) * Math.sqrt(mat.fck);
+    const v = Math.max(0.18 / GAMMA_C * k * Math.cbrt(100 * Math.min(rho, 0.02) * mat.fck), vmin);
+    return { VRdc: v * b * d / 1000, k, vmin };
+  }
+
+  /* Graniczna smukłość l/d (wzór 7.16, ρ' = 0) z poprawką 500/f_yk (A_s,prov ≈ A_s,req). */
+  function rcSpanDepth(K, rho, mat) {
+    const f = Math.sqrt(mat.fck), r0 = f * 1e-3, r = Math.max(rho, 1e-6);
+    const base = r <= r0 ? 11 + 1.5 * f * r0 / r + 3.2 * f * Math.pow(r0 / r - 1, 1.5) : 11 + 1.5 * f * r0 / r;
+    return K * base * Math.min(500 / mat.fyk, 1.5);
+  }
+
+  // ---------- zestawienie obciążeń stropu ----------
+  // Posadzka (warstwa wierzchnia): [nazwa, grubość m, ciężar kN/m³]
+  const FLOORS = {
+    deszczolki: ['Deszczółki (parkiet) na kleju', 0.022, 9],
+    deski: ['Deski podłogowe', 0.028, 5.5],
+    panele: ['Panele podłogowe z podkładem', 0.010, 8],
+    plytki: ['Płytki ceramiczne na kleju', 0.015, 21],
+    lastryko: ['Lastryko', 0.020, 22],
+    kamien: ['Płyty kamienne (granit)', 0.020, 28],
+    pcv: ['Wykładzina PCV', 0.003, 14],
+  };
+  // Przeznaczenie: [nazwa, q_k kN/m², ψ₂] – wartości orientacyjne wg PN-EN 1991-1-1 tab. 6.2,
+  // przed użyciem porównaj z tematem projektu / prowadzącym.
+  const USES = {
+    mieszkalne: ['Mieszkalne (kat. A)', 2.0, 0.3],
+    koszary: ['Koszary', 4.0, 0.3],
+    biura: ['Biura (kat. B)', 3.0, 0.3],
+    szkoly: ['Szkoły, kawiarnie, restauracje (C1)', 3.0, 0.6],
+    sale: ['Sale ze stałymi siedzeniami – kina, kościoły (C2)', 4.0, 0.6],
+    publiczne: ['Muzea, hole, korytarze bud. publicznych, szpitale (C3)', 5.0, 0.6],
+    sport: ['Sale gimnastyczne, taneczne (C4)', 5.0, 0.6],
+    sklepy: ['Sklepy (D1)', 5.0, 0.6],
+    magazyny: ['Magazyny, archiwa, biblioteki (E1)', 7.5, 0.8],
+    wlasne: ['Inne – wpisz q_k', null, 0.3],
+  };
+  function defaultZs() {
+    const f = FLOORS.deszczolki;
+    return {
+      use: 'koszary', qk: 4.0, floor: 'deszczolki', bw: 1.0,
+      rows: [
+        { n: f[0], t: f[1], y: f[2], v: 0, floor: true },
+        { n: 'Podkład cementowy', t: 0.03, y: 22, v: 0 },
+        { n: 'Folia', t: 0, y: 0, v: 0.01 },
+        { n: 'Styropian', t: 0.05, y: 0.45, v: 0 },
+        { n: 'Płyta żelbetowa', t: 0.10, y: 25, v: 0, slab: true },
+        { n: 'Tynk od spodu', t: 0.015, y: 19, v: 0 },
+      ],
+    };
+  }
+
   /* Zwraca właściwości przekroju w jednostkach obliczeniowych:
    * EI [kNm²], gk ciężar własny [kN/m] oraz dane do sprawdzeń. */
   function sectionProps(sec) {
@@ -105,6 +201,18 @@
         name, h, b, tw, tf, A, Iy, Wel, Wpl, Avz, fy,
       };
     }
+    if (sec.kind === 'rc') {
+      const b = +sec.b, h = +sec.h, phi = +sec.phi || 10;
+      const mat = rcMaterial(sec);
+      const I = b * h * h * h / 12; // mm⁴
+      return {
+        kind: 'rc',
+        label: `żelbet ${mat.conc} ${b}×${h} mm, f_yk = ${mat.fyk} MPa`,
+        EI: mat.Ecm * 1e6 * I * 1e-12,
+        gk: 25 * b * h * 1e-6,
+        b, h, I, phi, d: h - (+sec.cov || 0) - phi / 2, mat,
+      };
+    }
     // własny przekrój
     const E = +sec.E, I = +sec.I; // MPa, cm⁴
     return {
@@ -116,7 +224,10 @@
     };
   }
 
-  const api = { STEEL_PROFILES, STEEL_GRADES, TIMBER, DURATIONS, KDEF, E_STEEL, sectionProps };
+  const api = {
+    STEEL_PROFILES, STEEL_GRADES, TIMBER, DURATIONS, KDEF, E_STEEL, sectionProps,
+    CONCRETE, rcMaterial, rcBending, rcBars, rcVRdc, rcSpanDepth, FLOORS, USES, defaultZs,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Sections = api;
 })(this);

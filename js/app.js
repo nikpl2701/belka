@@ -26,8 +26,10 @@
 
   // ---------- stan ----------
   const LD = (t, g, sp, a, c, v1, v2) => ({ t, g, sp, a, c, v1, v2: v2 === undefined ? v1 : v2 });
-  const timberSec = (cls, b, h) => ({ kind: 'timber', timberClass: cls, b, h, sc: 1, family: 'IPE', profile: 'IPE 200', grade: 'S235', E: 11000, I: 5000, W: 400, fd: 0, gk: 0 });
-  const steelSec = (fam, prof, grade) => ({ kind: 'steel', timberClass: 'C24', b: 100, h: 200, sc: 1, family: fam, profile: prof, grade, E: 210000, I: 5000, W: 400, fd: 0, gk: 0 });
+  const RC0 = { conc: 'C30/37', fyk: 500, cov: 20, phi: 10 };
+  const timberSec = (cls, b, h) => Object.assign({ kind: 'timber', timberClass: cls, b, h, sc: 1, family: 'IPE', profile: 'IPE 200', grade: 'S235', E: 11000, I: 5000, W: 400, fd: 0, gk: 0 }, RC0);
+  const steelSec = (fam, prof, grade) => Object.assign({ kind: 'steel', timberClass: 'C24', b: 100, h: 200, sc: 1, family: fam, profile: prof, grade, E: 210000, I: 5000, W: 400, fd: 0, gk: 0 }, RC0);
+  const rcSec = (conc, fyk, b, h) => Object.assign(timberSec('C24', b, h), { kind: 'rc', conc, fyk });
   const nodesOf = list => list.map(s => (typeof s === 'string' ? { s, h: false } : s));
   const defSet = () => ({ gG: 1.35, gQ: 1.5, wlim: 250 });
   const grp = (name, dur, psi2, pat = true) => ({ name, dur, psi2, pat });
@@ -69,6 +71,10 @@
       groups: [grp('Użytkowe', 'medium', 0.3)],
       loads: [LD('q', 0, 0, 0, 0, 10), LD('q', 1, 0, 0, 0, 12)], set: defSet(),
     },
+    slab: {
+      spans: [2.88, 2.88, 2.88, 2.88, 2.88], nodes: nodesOf(['pin', 'roller', 'roller', 'roller', 'roller', 'roller']),
+      sec: rcSec('C30/37', 440, 1000, 100), sw: false, groups: [], loads: [], set: defSet(), zs: S.defaultZs(), applyZs: true,
+    },
   };
 
   const clone = o => JSON.parse(JSON.stringify(o));
@@ -96,12 +102,40 @@
     while (s.nodes.length < s.spans.length + 1) s.nodes.push({ s: 'pin', h: false });
     s.nodes.length = s.spans.length + 1;
     if (s.sw === undefined) s.sw = true;
+    s.zs = Object.assign(S.defaultZs(), s.zs || {});
     return s;
   }
   function save() {
     const json = JSON.stringify(state);
     try { localStorage.setItem('belka-state', json); } catch (e) { /* tryb prywatny */ }
     try { history.replaceState(null, '', '#' + btoa(unescape(encodeURIComponent(json)))); } catch (e) { /* ignoruj */ }
+  }
+
+  // ---------- zestawienie obciążeń stropu ----------
+  const r3 = v => Math.round(v * 1000) / 1000;
+  // grubość warstwy „płyta” bierze się z przekroju żelbetowego
+  const layerT = (st, L) => (L.slab && st.sec.kind === 'rc' ? num(st.sec.h) / 1000 : num(L.t));
+  const layerGk = (st, L) => (layerT(st, L) > 0 && num(L.y) > 0 ? layerT(st, L) * num(L.y) : num(L.v));
+  function zsTotals(st) {
+    const z = st.zs;
+    const gk = z.rows.reduce((a, L) => a + layerGk(st, L), 0);
+    const qk = num(z.qk);
+    const gG = num(st.set.gG) || 1.35, gQ = num(st.set.gQ) || 1.5;
+    return { gk, qk, gG, gQ, gd: gk * gG, qd: qk * gQ, bw: num(z.bw) || 1 };
+  }
+  const hasAuto = st => st.loads.some(L => L.auto);
+  // Zamienia zestawienie na obciążenia belki: G i grupa zmienna „osobno w przęsłach”
+  function applyZs(st) {
+    const t = zsTotals(st);
+    const use = S.USES[st.zs.use] || S.USES.wlasne;
+    const gname = st.zs.use === 'wlasne' ? 'Użytkowe' : 'Użytkowe – ' + use[0].replace(/ \(.*\)$/, '');
+    let gi = st.groups.findIndex(g => g.auto);
+    if (gi < 0) { st.groups.push(Object.assign(grp(gname, 'medium', use[2], true), { auto: true })); gi = st.groups.length - 1; }
+    else Object.assign(st.groups[gi], { name: gname, psi2: use[2] });
+    st.loads = st.loads.filter(L => !L.auto);
+    st.loads.unshift(Object.assign(LD('q', 0, -1, 0, 0, r3(t.gk * t.bw)), { auto: true }),
+      Object.assign(LD('q', gi + 1, -1, 0, 0, r3(t.qk * t.bw)), { auto: true }));
+    st.sw = false; // ciężar płyty jest w zestawieniu
   }
 
   // ---------- model obliczeniowy ----------
@@ -289,7 +323,7 @@
       // przegub bez podpory: wspornik, gdy drugi koniec jest ciągły (belka trwa dalej) lub utwierdzony
       return n[o].s === 'fixed' || (o !== 0 && o !== last && !n[o].h);
     };
-    model.spans.forEach((L, s) => {
+    if (sec.kind !== 'rc') model.spans.forEach((L, s) => {
       const cant = isCant(s);
       const i0 = xw.findIndex(x => x >= model.off[s] - 1e-9);
       let i1 = i0;
@@ -308,9 +342,65 @@
       checks.push({ name: `Ugięcie przęsła ${s + 1}${cant ? ' (wspornik)' : ''}`, util: wmax / lim,
         desc: `${isTimber ? 'w_fin' : 'w_max'} = ${nf(wmax * 1000, 1)} mm ≤ ${cant ? '2L' : 'L'}/${wl} = ${nf(lim * 1000, 1)} mm (x = ${nf(at)} m)` });
     });
+    if (sec.kind === 'rc') res.rc = rcChecks(st, model, sol, res.views.uls.M, VEd, isCant, checks);
     res.checks = checks;
     res.MEd = MEd; res.VEd = VEd;
     return res;
+  }
+
+  // Żelbet: zbrojenie w przęsłach i nad podporami, ściskanie betonu, ścinanie bez strzemion, l/d
+  function rcChecks(st, model, sol, M, VEd, isCant, checks) {
+    const sec = model.sec, mat = sec.mat, b = sec.b, d = sec.d, off = model.off, xs = sol.xs;
+    const rows = [];
+    if (d <= 0) { checks.push({ name: 'Wysokość użyteczna', util: 2, desc: 'd ≤ 0 – zmniejsz otulinę lub średnicę pręta' }); return { rows, d }; }
+    const add = (where, pos, MEd, span) => {
+      const r = S.rcBending(MEd, b, d, mat);
+      rows.push(Object.assign(r, { where, pos, M: MEd, span, bars: S.rcBars(r.AsReq, b, sec.h, sec.phi) }));
+    };
+    model.spans.forEach((_, s) => {
+      let mp = 0;
+      for (let i = 0; i < xs.length; i++) {
+        const xc = (xs[i - (i % 2)] + xs[i - (i % 2) + 1]) / 2;
+        if (xc > off[s] && xc < off[s + 1]) mp = Math.max(mp, M.max[i]);
+      }
+      add(`Przęsło ${s + 1}`, 'dołem', mp, s);
+    });
+    st.nodes.forEach((n, i) => {
+      let mn = 0;
+      for (let k = 0; k < xs.length; k++) if (Math.abs(xs[k] - off[i]) < 1e-9) mn = Math.min(mn, M.min[k]);
+      if (mn < -1e-6) add(`Podpora ${LETTERS[i]}`, 'górą', -mn, null);
+    });
+    // ściskanie betonu (ξ_eff ≤ ξ_eff,lim)
+    const worst = rows.reduce((w, r) => (!w || r.xi > w.xi ? r : w), null);
+    if (worst) {
+      checks.push({ name: 'Zginanie – strefa ściskana betonu', util: isFinite(worst.xi) ? worst.xi / worst.xiLim : 2,
+        desc: isFinite(worst.xi)
+          ? `${worst.where}: M_Ed = ${nf(worst.M)} kNm, μ = ${nf(worst.mu, 3)}, ξ_eff = ${nf(worst.xi, 3)} ≤ ξ_eff,lim = ${nf(worst.xiLim, 3)} (d = ${nf(d, 0)} mm)`
+          : `${worst.where}: M_Ed = ${nf(worst.M)} kNm – przekrój za mały (μ ≥ 0,5), zwiększ h` });
+    }
+    // ścinanie – ρ_l z najbardziej zbrojonego miejsca nad podporą (lub w przęśle, gdy brak momentów podporowych)
+    const sup = rows.filter(r => r.span === null);
+    const asl = Math.max(...(sup.length ? sup : rows).map(r => r.AsReq));
+    const rho = asl / (b * d);
+    const v = S.rcVRdc(b, d, rho, mat);
+    checks.push({ name: 'Ścinanie (bez zbrojenia poprzecznego)', util: VEd / v.VRdc,
+      desc: `V_Ed = ${nf(VEd)} kN ≤ V_Rd,c = ${nf(v.VRdc)} kN; k = ${nf(v.k, 3)}, ρ_l = ${nf(rho * 100, 3)}%` });
+    // ugięcia metodą l/d
+    const n = st.nodes, last = n.length - 1;
+    const cont = i => (i > 0 && i < last ? n[i].s !== 'none' && !n[i].h : n[i].s === 'fixed');
+    model.spans.forEach((L, s) => {
+      const cant = isCant(s);
+      const nc = cont(s) + cont(s + 1);
+      const K = cant ? 0.4 : [1.0, 1.3, 1.5][nc];
+      const r = rows.find(x => x.span === s);
+      const rs = (cant ? Math.max(asl, r.AsMin) : r.AsReq) / (b * d);
+      const lim = S.rcSpanDepth(K, rs, mat) * (L > 7 ? 7 / L : 1);
+      const ld = L * 1000 / d;
+      const kind = cant ? 'wspornik' : ['swobodnie podparte', 'skrajne', 'pośrednie'][nc];
+      checks.push({ name: `Ugięcie przęsła ${s + 1} – l/d (${kind})`, util: ld / lim,
+        desc: `l/d = ${nf(ld, 1)} ≤ ${nf(lim, 1)}; K = ${nf(K, 1)}, ρ = ${nf(rs * 100, 3)}%, × 500/f_yk` });
+    });
+    return { rows, d, rho, VRdc: v.VRdc };
   }
 
   // ---------- edytor ----------
@@ -338,8 +428,15 @@
   function renderSection() {
     const s = state.sec;
     let h = '<div class="fields">';
-    h += field('Rodzaj', `<select data-path="sec.kind" data-rerender="sec">${opt('timber', 'Drewno – prostokąt', s.kind)}${opt('steel', 'Stal – dwuteownik', s.kind)}${opt('custom', 'Własny (E, I)', s.kind)}</select>`);
-    if (s.kind === 'timber') {
+    h += field('Rodzaj', `<select data-path="sec.kind" data-rerender="sec">${opt('timber', 'Drewno – prostokąt', s.kind)}${opt('steel', 'Stal – dwuteownik', s.kind)}${opt('rc', 'Żelbet – płyta / belka prostokątna', s.kind)}${opt('custom', 'Własny (E, I)', s.kind)}</select>`);
+    if (s.kind === 'rc') {
+      h += field('Beton', `<select data-path="sec.conc">${Object.keys(S.CONCRETE).map(k => opt(k, k, s.conc)).join('')}</select>`);
+      h += field('Stal f<sub>yk</sub>', numIn('sec.fyk', s.fyk, 10), 'MPa');
+      h += field('Szerokość b', numIn('sec.b', s.b, 10), 'mm (płyta: pasmo 1000)');
+      h += field('Wysokość h', numIn('sec.h', s.h, 10), 'mm');
+      h += field('Otulina c<sub>nom</sub>', numIn('sec.cov', s.cov, 5), 'mm');
+      h += field('Pręty φ', `<select data-path="sec.phi">${[6, 8, 10, 12, 14, 16, 20, 25].map(v => opt(v, v, s.phi)).join('')}</select>`, 'mm');
+    } else if (s.kind === 'timber') {
       h += field('Klasa', `<select data-path="sec.timberClass">${Object.keys(S.TIMBER).map(k => opt(k, k + (S.TIMBER[k].glulam ? ' (klejone)' : ''), s.timberClass)).join('')}</select>`);
       h += field('Szerokość b', numIn('sec.b', s.b, 5), 'mm');
       h += field('Wysokość h', numIn('sec.h', s.h, 10), 'mm');
@@ -382,7 +479,7 @@
     state.loads.forEach((L, i) => {
       const col = L.g > 0 ? GROUP_COLORS[(L.g - 1) % GROUP_COLORS.length] : G_COLOR;
       const tag = { q: 'q', P: 'P', M: 'M' }[L.t];
-      h += `<div class="item"><span class="tag" style="background:${col}">${tag}</span>
+      h += `<div class="item"><span class="tag" style="background:${col}">${tag}</span>${L.auto ? '<span class="auto-tag" title="Wartość aktualizowana z zestawienia obciążeń">z zestawienia</span>' : ''}
         <select data-path="loads.${i}.g" data-rerender="loads">${groupOpts(L.g)}</select>
         <select data-path="loads.${i}.sp">${spanOpts(L.sp)}</select>
         <label>a ${numIn(`loads.${i}.a`, L.a, 0.05)}</label>`;
@@ -410,8 +507,47 @@
     $('settings').innerHTML = h;
   }
 
+  function renderZs() {
+    const z = state.zs;
+    let h = '<div class="fields">';
+    h += field('Przeznaczenie', `<select data-path="zs.use" data-rerender="zs">${Object.entries(S.USES).map(([k, u]) => opt(k, u[0], z.use)).join('')}</select>`);
+    h += field('q<sub>k</sub> użytkowe', numIn('zs.qk', z.qk, 0.5), 'kN/m²');
+    h += field('Posadzka', `<select data-path="zs.floor" data-rerender="zs">${Object.entries(S.FLOORS).map(([k, f]) => opt(k, f[0], z.floor)).join('')}</select>`);
+    h += field('Szer. pasma', numIn('zs.bw', z.bw, 0.1), 'm');
+    h += '</div><p class="hint" style="margin:4px 0 8px">Szerokość pasma: płyta – 1 m; żebro/belka – rozstaw (szerokość zbierania obciążeń).</p>';
+    h += '<div class="list">';
+    z.rows.forEach((L, i) => {
+      const synced = L.slab && state.sec.kind === 'rc';
+      const tIn = synced ? `<span title="grubość z przekroju żelbetowego (h)" id="zst-${i}">${nf(layerT(state, L), 3)}</span>` : numIn(`zs.rows.${i}.t`, L.t, 0.005);
+      h += `<div class="item zs-row"><input type="text" data-path="zs.rows.${i}.n" value="${esc(L.n)}">
+        <label>${tIn} m ×</label><label>${numIn(`zs.rows.${i}.y`, L.y, 0.5)} kN/m³</label>
+        ${num(L.t) > 0 || synced ? '' : `<label>lub ${numIn(`zs.rows.${i}.v`, L.v, 0.01)} kN/m²</label>`}
+        <span class="val" id="zsv-${i}"></span>
+        <button class="btn icon del" data-act="delLayer" data-i="${i}" title="Usuń warstwę">✕</button></div>`;
+    });
+    h += '</div><div class="row-btns"><button class="btn small" data-act="addLayer">+ warstwa</button>';
+    h += `<button class="btn small" data-act="applyZs" style="margin-left:auto;font-weight:600">${hasAuto(state) ? '↻ Wstawione do belki' : '→ Wstaw do belki'}</button></div>`;
+    h += '<div id="zsTot" class="zs-tot"></div>';
+    $('zs').innerHTML = h;
+    renderZsTot();
+  }
+
+  function renderZsTot() {
+    const t = zsTotals(state);
+    state.zs.rows.forEach((L, i) => {
+      const e = $('zsv-' + i); if (e) e.textContent = nf(layerGk(state, L)) + ' kN/m²';
+      const s = $('zst-' + i); if (s) s.textContent = nf(layerT(state, L), 3);
+    });
+    let h = `<table><tr><th>kN/m²</th><th>charakt.</th><th>γ<sub>F</sub></th><th>oblicz.</th></tr>
+      <tr><td>Stałe (ST)</td><td>${nf(t.gk)}</td><td>${nf(t.gG)}</td><td>${nf(t.gd)}</td></tr>
+      <tr><td>Zmienne (ZM)</td><td>${nf(t.qk)}</td><td>${nf(t.gQ)}</td><td>${nf(t.qd)}</td></tr>
+      <tr class="sum"><td>Razem ST + ZM</td><td>${nf(t.gk + t.qk)}</td><td>–</td><td>${nf(t.gd + t.qd)}</td></tr></table>`;
+    h += `<p class="hint" style="margin:6px 0 0">Na belkę (× ${nf(t.bw)} m): g<sub>k</sub> = ${nf(t.gk * t.bw, 3)} kN/m, q<sub>k</sub> = ${nf(t.qk * t.bw, 3)} kN/m.${hasAuto(state) ? ' Zmiany w zestawieniu aktualizują belkę automatycznie.' : ''}</p>`;
+    $('zsTot').innerHTML = h;
+  }
+
   function renderEditor() {
-    renderGeometry(); renderSection(); renderGroups(); renderLoads(); renderSettings();
+    renderGeometry(); renderSection(); renderZs(); renderGroups(); renderLoads(); renderSettings();
   }
 
   function setPath(path, value) {
@@ -439,12 +575,28 @@
       const list = S.STEEL_PROFILES[v];
       state.sec.profile = (list.find(r => r[0].endsWith(' ' + n)) || list[0])[0];
     }
+    if (path === 'sec.kind' && (v === 'rc') !== (state.sec.kind === 'rc')) {
+      // rozsądne wymiary po zmianie materiału
+      if (v === 'rc') { const sl = state.zs.rows.find(L => L.slab); Object.assign(state.sec, { b: 1000, h: sl && num(sl.t) > 0 ? Math.round(num(sl.t) * 1000) : 100 }); }
+      else Object.assign(state.sec, { b: 100, h: 200 });
+    }
     setPath(path, v);
     if (/^nodes\.\d+\.s$/.test(path) && v === 'fixed') state.nodes[+path.split('.')[1]].h = false;
+    if (path === 'zs.use' && S.USES[v] && S.USES[v][1] !== null) state.zs.qk = S.USES[v][1];
+    if (path === 'zs.floor' && S.FLOORS[v]) {
+      const f = S.FLOORS[v], row = { n: f[0], t: f[1], y: f[2], v: 0, floor: true };
+      const i = state.zs.rows.findIndex(L => L.floor);
+      if (i >= 0) state.zs.rows[i] = row; else state.zs.rows.unshift(row);
+    }
     const rr = t.dataset.rerender;
     if (rr === 'geo') renderGeometry();
     if (rr === 'sec') renderSection();
     if (rr === 'loads') renderLoads();
+    if (/^(zs|sec|set)\./.test(path)) {
+      if (rr === 'zs' || path === 'sec.kind' || (e.type === 'change' && /^zs\.rows\.\d+\.t$/.test(path))) renderZs();
+      else renderZsTot();
+      if (hasAuto(state) && /^(zs\.|sec\.)/.test(path)) { applyZs(state); renderLoads(); if (path === 'zs.use') renderGroups(); }
+    }
     update();
   }
 
@@ -469,6 +621,14 @@
       const L0 = num(state.spans[0]);
       state.loads.push(t === 'q' ? LD('q', state.groups.length ? 1 : 0, -1, 0, 0, 2)
         : LD(t, state.groups.length ? 1 : 0, 0, +(L0 / 2).toFixed(2), 0, t === 'P' ? 10 : 5));
+    } else if (b.dataset.act === 'addLayer') {
+      state.zs.rows.push({ n: 'Warstwa', t: 0.01, y: 20, v: 0 });
+    } else if (b.dataset.act === 'delLayer') {
+      state.zs.rows.splice(+b.dataset.i, 1);
+      if (hasAuto(state)) applyZs(state);
+    } else if (b.dataset.act === 'applyZs') {
+      applyZs(state);
+      toast('Wstawiono do belki: G i obciążenie użytkowe (osobno w przęsłach). Ciężar własny belki wyłączony – płyta jest w zestawieniu.');
     } else if (b.dataset.act === 'delLoad') {
       state.loads.splice(+b.dataset.i, 1);
     } else if (b.dataset.act === 'delGroup') {
@@ -486,7 +646,11 @@
   $('example').addEventListener('change', e => {
     const k = e.target.value;
     if (!EXAMPLES[k]) return;
-    state = clone(EXAMPLES[k]);
+    const zs = state.zs;
+    const ex = clone(EXAMPLES[k]);
+    state = normalize(ex);
+    if (!EXAMPLES[k].zs) state.zs = zs;
+    if (ex.applyZs) { delete state.applyZs; applyZs(state); }
     e.target.value = '';
     renderEditor();
     update();
@@ -514,17 +678,23 @@
     else if (s.kind === 'timber') {
       const gl = S.TIMBER[s.timberClass].glulam;
       cands = TIMBER_H[gl ? 'glulam' : 'solid'].map(h => Object.assign({}, s, { h }));
-    } else { toast('Dobór działa dla drewna i stali.'); return; }
+    } else if (s.kind === 'rc') {
+      for (let h = 60; h <= 1200; h += 10) cands.push(Object.assign({}, s, { h }));
+    } else { toast('Dobór działa dla drewna, stali i żelbetu.'); return; }
     for (const c of cands) {
-      const r = compute(Object.assign({}, state, { sec: c }));
+      const st2 = clone(state);
+      st2.sec = c;
+      if (hasAuto(st2)) applyZs(st2); // ciężar płyty zależy od h
+      const r = compute(st2);
       if (r.ok && r.checks.every(ch => ch.util === null || ch.util <= 1)) {
         state.sec = c;
-        renderSection(); update();
+        if (hasAuto(state)) applyZs(state);
+        renderEditor(); update();
         toast(`Dobrano: ${S.sectionProps(c).label}`);
         return;
       }
     }
-    toast(s.kind === 'timber' ? 'Żadna wysokość nie wystarcza – zwiększ szerokość b lub klasę drewna.' : 'Żaden profil z typoszeregu nie wystarcza – zmień typ lub gatunek stali.');
+    toast(s.kind === 'rc' ? 'Żadna wysokość nie wystarcza – zmień beton, stal lub schemat.' : s.kind === 'timber' ?'Żadna wysokość nie wystarcza – zwiększ szerokość b lub klasę drewna.' : 'Żaden profil z typoszeregu nie wystarcza – zmień typ lub gatunek stali.');
   }
 
   // ---------- wyniki ----------
@@ -540,7 +710,7 @@
     const gk = result.model.sec.gk;
     const gi = $('gkInfo');
     if (gi) gi.textContent = gk > 0 ? `(g_k = ${nf(gk, 3)} kN/m)` : '';
-    if (!result.ok) { $('chart').innerHTML = ''; $('reactions').innerHTML = ''; $('extremes').innerHTML = ''; $('checks').innerHTML = ''; return; }
+    if (!result.ok) { $('chart').innerHTML = ''; $('reactions').innerHTML = ''; $('extremes').innerHTML = ''; $('checks').innerHTML = ''; $('rcCard').hidden = true; return; }
     // lista widoków
     const sel = $('view');
     const keys = Object.keys(result.views);
@@ -599,6 +769,7 @@
     let h = `<div class="secinfo">Przekrój: <b>${esc(sec.label)}</b> · EI = ${nf(sec.EI, 0)} kNm² · g<sub>k</sub> = ${nf(sec.gk, 3)} kN/m`;
     if (sec.kind === 'steel') h += ` · W<sub>pl</sub> = ${nf(sec.Wpl, 1)} cm³ · I<sub>y</sub> = ${nf(sec.Iy, 0)} cm⁴`;
     if (isT) h += ` · W = ${nf(sec.W / 1000, 1)} cm³ · k<sub>def</sub> = ${nf(result.kdef, 1)}`;
+    if (sec.kind === 'rc') h += ` · d = ${nf(sec.d, 0)} mm · f<sub>cd</sub> = ${nf(sec.mat.fcd)} MPa · f<sub>yd</sub> = ${nf(sec.mat.fyd, 1)} MPa`;
     h += '</div>';
     const valid = result.checks.filter(c => c.util !== null);
     const worst = valid.reduce((m, c) => Math.max(m, c.util), 0);
@@ -616,14 +787,50 @@
     const notes = [];
     if (sec.kind === 'steel') notes.push('Założono przekrój klasy 1–2 i belkę zabezpieczoną przed zwichrzeniem (np. stropem). γ_M0 = 1,0. Ugięcia od obciążeń charakterystycznych.');
     if (isT) notes.push('Założono belkę zabezpieczoną przed zwichrzeniem (k_crit = 1). Ugięcie końcowe w_fin = w_G(1+k_def) + Σ w_Q(1+ψ₂·k_def). Nie sprawdzono docisku na podporach.');
+    if (sec.kind === 'rc') notes.push('Statyka sprężysta (stałe EI, bez redystrybucji); momenty podporowe w osi podpory, bez redukcji do lica – po bezpiecznej stronie. Ugięcia sprawdzone metodą l/d (PN-EN 1992-1-1, 7.4.2); wykres ugięć to sprężysty przekrój niezarysowany – tylko orientacyjnie. V_Ed w osi podpory.');
     notes.push('Kombinacja SGN uproszczona: γ_G·G + γ_Q·ΣQ (bez współczynników ψ₀) – po bezpiecznej stronie.');
     h += `<p class="hint" style="margin-top:8px">${notes.join(' ')}</p>`;
     $('checks').innerHTML = h;
+    renderRc();
+  }
+
+  function renderRc() {
+    const rc = result.rc, card = $('rcCard');
+    card.hidden = !rc || !rc.rows.length;
+    if (card.hidden) return;
+    const sec = result.model.sec;
+    const cm = v => (isFinite(v) ? nf(v / 100, 2) : '–');
+    let h = `<div class="tablewrap"><table><tr><th>Miejsce</th><th>M<sub>Ed</sub> [kNm]</th><th>μ</th><th>ξ<sub>eff</sub></th><th>A<sub>s,req</sub> [cm²]</th><th>A<sub>s,min</sub> [cm²]</th><th>Propozycja</th><th>A<sub>s,prov</sub> [cm²]</th></tr>`;
+    rc.rows.forEach(r => {
+      const bad = !isFinite(r.xi) || r.xi > r.xiLim;
+      h += `<tr><td>${esc(r.where)} <span class="auto-tag">${r.pos}</span></td><td>${nf(r.M)}</td><td>${nf(r.mu, 3)}</td>
+        <td class="${bad ? 'bad' : ''}">${isFinite(r.xi) ? nf(r.xi, 3) : '> lim'}</td><td><b>${cm(r.As)}</b></td><td>${cm(r.AsMin)}</td>
+        <td>${esc(r.bars.text)}</td><td>${cm(r.bars.AsProv)}</td></tr>`;
+    });
+    h += '</table></div>';
+    h += `<p class="hint" style="margin-top:6px">Na szerokości b = ${nf(sec.b, 0)} mm${sec.b === 1000 ? ' (czyli na 1 m płyty)' : ''}, d = h − c<sub>nom</sub> − φ/2 = ${nf(sec.d, 0)} mm.
+      A<sub>s,min</sub> = max(0,26·f<sub>ctm</sub>/f<sub>yk</sub>; 0,0013)·b·d. ${sec.b >= 500 ? `Rozstaw prętów ≤ min(2h; 250 mm) = ${nf(Math.min(2 * sec.h, 250), 0)} mm. ` : ''}
+      Propozycja dobiera rozstaw/liczbę prętów φ${sec.phi} do większej z A<sub>s,req</sub> i A<sub>s,min</sub> – zmień φ w przekroju, by zobaczyć inne warianty.</p>`;
+    $('rcTable').innerHTML = h;
   }
 
   function renderSummary() {
     const st = state, m = result.model;
-    let h = '<table><tr><th>Węzeł</th><th>Podpora</th><th>x [m]</th></tr>';
+    let h = '';
+    if (hasAuto(st)) {
+      const t = zsTotals(st);
+      h += `<p><b>Zestawienie obciążeń</b> – przeznaczenie: ${esc((S.USES[st.zs.use] || S.USES.wlasne)[0])}, posadzka: ${esc((S.FLOORS[st.zs.floor] || [''])[0])}</p>
+        <table><tr><th>Warstwa</th><th>grubość [m]</th><th>γ [kN/m³]</th><th>g<sub>k</sub> [kN/m²]</th><th>γ<sub>F</sub></th><th>g<sub>d</sub> [kN/m²]</th></tr>`;
+      st.zs.rows.forEach(L => {
+        const tt = layerT(st, L), g = layerGk(st, L);
+        h += `<tr><td>${esc(L.n)}</td><td>${tt > 0 ? nf(tt, 3) : '–'}</td><td>${num(L.y) > 0 && tt > 0 ? nf(num(L.y), 2) : '–'}</td><td>${nf(g)}</td><td>${nf(t.gG)}</td><td>${nf(g * t.gG)}</td></tr>`;
+      });
+      h += `<tr><td><b>Razem stałe</b></td><td></td><td></td><td><b>${nf(t.gk)}</b></td><td></td><td><b>${nf(t.gd)}</b></td></tr>
+        <tr><td>Zmienne użytkowe</td><td></td><td></td><td>${nf(t.qk)}</td><td>${nf(t.gQ)}</td><td>${nf(t.qd)}</td></tr>
+        <tr><td><b>Razem ST + ZM</b></td><td></td><td></td><td><b>${nf(t.gk + t.qk)}</b></td><td></td><td><b>${nf(t.gd + t.qd)}</b></td></tr></table>
+        <p>Szerokość pasma ${nf(t.bw)} m.</p><br>`;
+    }
+    h += '<table><tr><th>Węzeł</th><th>Podpora</th><th>x [m]</th></tr>';
     st.nodes.forEach((n, i) => { h += `<tr><td>${LETTERS[i]}</td><td>${SUPPORTS[n.s]}${n.h ? ' + przegub' : ''}</td><td>${nf(m.off[i])}</td></tr>`; });
     h += '</table><br><table><tr><th>Obciążenie</th><th>Grupa</th><th>Położenie</th><th>Wartość</th></tr>';
     m.drawLoads.forEach(L => {

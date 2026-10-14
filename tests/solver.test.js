@@ -71,5 +71,26 @@ const bad = solve({ spans: [L], nodes: [{ support: 'pin' }, { support: 'none' }]
 console.log(bad.ok ? 'FAIL mechanizm niewykryty' : 'OK   mechanizm wykryty: ' + bad.error);
 if (bad.ok) fails++;
 
+// 10. Żelbet: płyta 1 m, d = 75 mm, C30/37, f_yk = 440 MPa, M_Ed = 5 kNm
+const S = require('../js/sections.js');
+const mat = S.rcMaterial({ conc: 'C30/37', fyk: 440 });
+near('Żelbet: f_cd = 30/1,4', mat.fcd, 30 / 1.4);
+near('Żelbet: f_yd = 440/1,15', mat.fyd, 440 / 1.15);
+const rb = S.rcBending(5, 1000, 75, mat);
+const mu = 5e6 / (1000 * 75 * 75 * (30 / 1.4));
+near('Żelbet: μ', rb.mu, mu);
+near('Żelbet: A_s = ξ·b·d·f_cd/f_yd', rb.As, (1 - Math.sqrt(1 - 2 * mu)) * 1000 * 75 * (30 / 1.4) / (440 / 1.15));
+near('Żelbet: A_s,min = 0,26·f_ctm/f_yk·b·d', rb.AsMin, 0.26 * 2.9 / 440 * 1000 * 75);
+near('Żelbet: ξ_eff,lim (f_yk 440)', rb.xiLim, 0.8 * 0.0035 / (0.0035 + 440 / 1.15 / 200000));
+const bars = S.rcBars(rb.AsReq, 1000, 100, 10);
+console.log((bars.AsProv >= rb.AsReq && bars.s <= 200 ? 'OK   ' : 'FAIL ') + 'Żelbet: pręty ' + bars.text);
+if (!(bars.AsProv >= rb.AsReq && bars.s <= 200)) fails++;
+const sl = S.sectionProps({ kind: 'rc', conc: 'C30/37', fyk: 440, b: 1000, h: 100, cov: 20, phi: 10 });
+near('Żelbet: ciężar płyty 0,10·25', sl.gk, 2.5);
+near('Żelbet: d = h − c − φ/2', sl.d, 75);
+// zestawienie domyślne = tabelka ręczna (ST 3,68 kN/m²)
+const z = S.defaultZs();
+near('Zestawienie: suma stałych', z.rows.reduce((a, L) => a + (L.t > 0 && L.y > 0 ? L.t * L.y : L.v), 0), 3.6755);
+
 console.log(fails ? `\n${fails} test(ów) nie przeszło` : '\nWszystkie testy OK');
 process.exit(fails ? 1 : 0);

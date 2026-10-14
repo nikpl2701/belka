@@ -96,7 +96,7 @@ label.inline select { color: var(--text); }
 .row-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 
 /* formularze */
-.fields { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
+.fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: center; }
 .fields > label { color: var(--muted); }
 .fields .unit { color: var(--muted); margin-left: 4px; font-size: 12px; }
 .geo-node, .geo-span { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -119,6 +119,24 @@ label.inline select { color: var(--text); }
 .item input[type=text] { width: 110px; }
 .item .del { margin-left: auto; }
 .empty { color: var(--muted); font-style: italic; }
+
+/* zestawienie obciążeń */
+details.card > summary { cursor: pointer; list-style: none; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary h2 { display: inline; }
+details.card > summary::after { content: '▾'; color: var(--muted); margin-left: 6px; }
+details.card:not([open]) > summary::after { content: '▸'; }
+details.card[open] > summary { margin-bottom: 8px; }
+.zs-row input[type=text] { width: 150px; flex: 1 1 120px; }
+.zs-row input[type=number] { width: 58px; }
+.zs-row .val { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; min-width: 64px; text-align: right; }
+.zs-row .del { margin-left: 0; }
+.zs-tot { margin-top: 8px; }
+.zs-tot td, .zs-tot th { font-variant-numeric: tabular-nums; }
+.zs-tot tr.sum td { font-weight: 700; }
+.auto-tag { color: var(--muted); font-size: 11.5px; font-style: italic; }
+.fields > div { min-width: 0; }
+.fields select { max-width: 100%; }
 
 /* wykres */
 .readout {

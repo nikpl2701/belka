@@ -17,6 +17,12 @@ Nic nie trzeba instalować – wystarczy otworzyć stronę.
   - drewno – zginanie i ścinanie z k_mod (klasa użytkowania, czas trwania obciążenia), k_h, ugięcie końcowe w_fin z pełzaniem (k_def, ψ₂),
   - stal – M_c,Rd (W_pl), V_pl,Rd, ugięcie,
   - przycisk **„Dobierz najmniejszy przekrój”**.
+- **Zestawienie obciążeń stropu**: wybór **przeznaczenia** (q_k wg kategorii PN-EN 1991-1-1, wartości orientacyjne)
+  i **rodzaju posadzki**, edytowalne warstwy (grubość × ciężar), tabela charakterystyczne / γ_F / obliczeniowe,
+  przycisk „Wstaw do belki” (G + Q osobno w przęsłach, × szerokość pasma) – później belka aktualizuje się sama.
+- **Żelbet** (PN-EN 1992-1-1, uproszczone): beton C16/20–C50/60, dowolne f_yk, otulina, średnica prętów;
+  zbrojenie A_s w każdym przęśle i nad każdą podporą z propozycją rozstawu, A_s,min, ściskanie betonu (ξ_eff,lim),
+  ścinanie V_Rd,c bez strzemion, ugięcia metodą l/d. Przykład „Płyta stropowa żelbetowa (5 przęseł)”.
 - **Udostępnianie**: przycisk „Kopiuj link” zapisuje cały schemat w adresie strony. Dane zapisują się też w przeglądarce.
 - **Drukuj / PDF**: wydruk wyników z zestawieniem danych.
 
